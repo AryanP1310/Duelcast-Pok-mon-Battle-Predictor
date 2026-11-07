@@ -1,0 +1,6 @@
+venv
+archive
+explore.ipynb
+__pycache__
+.pytest_cache
+combats.csv

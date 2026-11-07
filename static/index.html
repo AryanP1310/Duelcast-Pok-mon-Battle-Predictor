@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Duelcast: predict the winner before the first move</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,800&family=Instrument+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ===== 1. Tokens: LCD-screen palette, taken from the handheld battle screens the data comes from ===== */
+:root{
+  --bg:#E4E9CF; --ink:#17221A; --muted:#46564B; --panel:#D6DEB9; --line:#17221A;
+  --flame:#D9411E; --sun:#F2C14E; --tide:#3E6F8E; --lcd:#C5D3A0; --lcd-ink:#17221A;
+  --display:'Fraunces',Georgia,'Times New Roman',serif;
+  --body:'Instrument Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --wrap:1120px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){--bg:#111912;--ink:#E4E9CF;--muted:#A5B3A0;--panel:#1B261D;--line:#E4E9CF;--flame:#F0643F}
+}
+:root[data-theme="dark"]{--bg:#111912;--ink:#E4E9CF;--muted:#A5B3A0;--panel:#1B261D;--line:#E4E9CF;--flame:#F0643F}
+
+/* ===== 2. Base + layout ===== */
+*{box-sizing:border-box;margin:0}
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-behavior:smooth;scroll-padding-top:calc(env(safe-area-inset-top,0px) + 76px)}
+body{background:var(--bg);color:var(--ink);font:400 1.0625rem/1.6 var(--body);-webkit-font-smoothing:antialiased}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:30}
+.wrap{max-width:var(--wrap);margin:0 auto;padding:0 clamp(1.25rem,4vw,2.5rem)}
+h1,h2,h3{font-family:var(--display);font-optical-sizing:auto;line-height:1.05;letter-spacing:-.02em}
+h2{font-size:clamp(2rem,4.5vw,3.25rem);font-weight:800;max-width:16ch}
+p{max-width:62ch}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--flame);outline-offset:3px}
+svg{display:block}
+
+/* ===== 3. Header + collapsing nav ===== */
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:40;background:var(--bg);border-bottom:2px solid var(--line)}
+.nav .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
+.brand{display:flex;align-items:center;gap:.6rem;font:800 1.5rem var(--display);text-decoration:none;letter-spacing:-.02em}
+.brand .orb{width:26px;animation:spin 6s steps(8) infinite}
+.menu{display:flex;gap:2rem;list-style:none;padding:0}
+.menu a{text-decoration:none;font-weight:500;background:linear-gradient(var(--flame),var(--flame)) 0 100%/0 3px no-repeat;transition:background-size .25s}
+.menu a:hover{background-size:100% 3px}
+.burger{display:none;background:none;border:2px solid var(--line);color:var(--ink);width:44px;height:44px;cursor:pointer}
+.burger span,.burger span::before,.burger span::after{display:block;width:20px;height:2px;background:currentColor;margin:auto;position:relative;transition:transform .25s}
+.burger span::before,.burger span::after{content:"";position:absolute;left:0}
+.burger span::before{top:-6px}.burger span::after{top:6px}
+.nav.open .burger span{background:transparent}
+.nav.open .burger span::before{transform:translateY(6px) rotate(45deg)}
+.nav.open .burger span::after{transform:translateY(-6px) rotate(-45deg)}
+@media (max-width:760px){
+  .burger{display:block}
+  .menu{position:absolute;left:0;right:0;top:100%;flex-direction:column;gap:0;background:var(--bg);border-bottom:2px solid var(--line);max-height:0;overflow:hidden;transition:max-height .3s}
+  .nav.open .menu{max-height:260px}
+  .menu a{display:block;padding:1rem clamp(1.25rem,4vw,2.5rem);border-top:1px solid var(--line)}
+}
+
+/* ===== 4. Hero ===== */
+.hero{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(2rem,5vw,4.5rem);align-items:center;padding-top:clamp(2.5rem,7vw,5.5rem);padding-bottom:clamp(3rem,7vw,5.5rem)}
+.hero h1{font-size:clamp(2.7rem,6.4vw,5.2rem);font-weight:800}
+.hero p{margin:1.5rem 0 2rem;font-size:1.15rem;color:var(--muted)}
+.cta{display:flex;flex-wrap:wrap;gap:1rem 1.5rem;align-items:center}
+.btn{display:inline-block;background:var(--ink);color:var(--bg);padding:.9rem 1.5rem;font-weight:600;text-decoration:none;box-shadow:4px 4px 0 var(--flame);transition:transform .15s,box-shadow .15s}
+.btn:hover{transform:translate(-2px,-2px);box-shadow:7px 7px 0 var(--flame)}
+.btn:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--flame)}
+.link{font-weight:600;text-underline-offset:5px;text-decoration-thickness:2px}
+.link:hover{color:var(--flame)}
+
+/* handheld battle screen: the page’s one big moment */
+.screen{background:var(--lcd);color:var(--lcd-ink);border:3px solid #17221A;box-shadow:9px 9px 0 var(--flame);padding:1rem;background-image:repeating-linear-gradient(0deg,rgba(23,34,26,.07) 0 1px,transparent 1px 3px)}
+.field{display:flex;justify-content:space-between;align-items:flex-end;height:clamp(200px,28vw,250px);border-bottom:3px solid #17221A;padding:0 .25rem 0}
+.fighter{width:43%;display:flex;flex-direction:column;align-items:center;gap:.35rem}
+.tag{display:flex;justify-content:space-between;width:100%;font-weight:600;font-size:.85rem}
+.hp{width:100%;height:12px;border:2px solid #17221A;background:#E4E9CF;padding:1px}
+.hp i{display:block;height:100%;background:#3F8F3B}
+.a .hp i{animation:hpA 6s infinite}.b .hp i{animation:hpB 6s infinite}
+.bob{width:100%;animation:bob 1.1s steps(2,end) infinite}
+.b .bob{animation-delay:.55s}
+.spr{width:100%}
+.a .spr{animation:fa 6s infinite}.b .spr{animation:fb 6s infinite}
+.a .bob{width:min(150px,100%)}.b .bob{width:min(138px,100%)}
+.say{border:2px solid #17221A;background:#E4E9CF;padding:.65rem .85rem;margin-top:1rem;font-weight:500;min-height:3.1rem;font-size:.98rem}
+@keyframes bob{50%{transform:translateY(-4px)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fa{0%,14%{transform:none;filter:none}20%{transform:translateX(70px)}28%,59%{transform:none;filter:none}61%{transform:translateX(-10px);filter:brightness(3)}63%{transform:translateX(4px);filter:none}66%,100%{transform:none;filter:none}}
+@keyframes fb{0%,19%{transform:none;filter:none}21%{transform:translateX(10px);filter:brightness(3)}23%{transform:translateX(-4px);filter:none}26%,54%{transform:none}60%{transform:translateX(-70px)}68%,100%{transform:none;filter:none}}
+@keyframes hpB{0%,22%{width:100%}28%,94%{width:58%}100%{width:100%}}
+@keyframes hpA{0%,60%{width:100%}66%,94%{width:78%}100%{width:100%}}
+
+/* ===== 5. Scoreboard ===== */
+.score{border-top:2px solid var(--line);border-bottom:2px solid var(--line);background:var(--panel)}
+.score .wrap{display:grid;grid-template-columns:repeat(3,1fr)}
+.score div{padding:2rem 1.5rem 2rem 0;border-right:2px solid var(--line)}
+.score div+div{padding-left:1.5rem}.score div:last-child{border-right:0}
+.score b{display:block;font:800 clamp(2.4rem,5vw,3.75rem)/1 var(--display);letter-spacing:-.03em}
+.score span{display:block;margin-top:.5rem;color:var(--muted);max-width:26ch;font-size:.98rem}
+
+/* ===== Live predictor ===== */
+.duel{display:grid;grid-template-columns:1fr auto 1fr auto;gap:1rem;align-items:end;margin-top:2.25rem}
+.duel label{display:grid;gap:.4rem;font-weight:600}
+.duel input{font:500 1.1rem var(--body);padding:.85rem 1rem;border:2px solid var(--line);background:var(--bg);color:var(--ink);width:100%;min-width:0}
+.swap{background:none;border:2px solid var(--line);color:var(--ink);padding:.85rem 1rem;font:600 1rem var(--body);cursor:pointer;transition:background .15s}
+.swap:hover{background:var(--panel)}
+button.btn{border:0;cursor:pointer;font:600 1rem var(--body)}
+button.btn:disabled{opacity:.6;cursor:wait}
+.out{margin-top:2rem;border:2px solid var(--line);background:var(--panel);padding:1.5rem;min-height:7rem;color:var(--muted)}
+.out.err{border-color:var(--flame);color:var(--ink)}
+.out.ok{color:var(--ink)}
+.verdict{font:800 clamp(1.5rem,3.5vw,2.25rem) var(--display);letter-spacing:-.02em;margin-bottom:1rem;max-width:none}
+.split{display:flex;height:44px;border:2px solid var(--line)}
+.split i{flex:0 1 50%;min-width:0;display:flex;align-items:center;padding:0 .8rem;font-weight:600;font-style:normal;white-space:nowrap;overflow:hidden;color:#fff;transition:flex-basis 1s cubic-bezier(.2,.8,.2,1)}
+.split i:first-child{background:#C23A19}.split i:last-child{background:var(--tide)}
+@media (max-width:700px){.duel{grid-template-columns:1fr}}
+
+/* ===== 6. Pipeline tabs ===== */
+section.s{padding:clamp(3.5rem,8vw,6rem) 0}
+.how{display:grid;grid-template-columns:260px 1fr;gap:clamp(1.5rem,4vw,3.5rem);margin-top:2.5rem}
+.tabs{display:flex;flex-direction:column;gap:.6rem}
+.tab{display:flex;align-items:center;gap:.9rem;text-align:left;background:none;border:2px solid var(--line);color:var(--ink);padding:.9rem 1rem;font:600 1.05rem var(--body);cursor:pointer;transition:transform .15s,background .15s,box-shadow .15s}
+.tab:hover{transform:translateX(4px)}
+.tab b{font:800 1.4rem var(--display);width:1.5rem}
+.tab[aria-selected="true"]{background:var(--ink);color:var(--bg);box-shadow:5px 5px 0 var(--flame);transform:translateX(0)}
+.panel{border:2px solid var(--line);background:var(--panel);padding:clamp(1.25rem,3vw,2.25rem);min-height:320px}
+.panel:not([hidden]){animation:swap .35s ease-out}
+.panel h3{font-size:clamp(1.5rem,3vw,2.1rem);font-weight:800;margin-bottom:.8rem}
+.panel p{color:var(--muted)}
+pre{margin-top:1.5rem;background:#17221A;color:#E4E9CF;padding:1.1rem 1.25rem;overflow-x:auto;font:400 .9rem/1.65 ui-monospace,'SF Mono',Menlo,Consolas,monospace;border-left:6px solid var(--flame)}
+pre em{color:var(--sun);font-style:normal}
+@keyframes swap{from{opacity:0;transform:translateY(8px)}}
+
+/* ===== 7. Results ===== */
+.res{display:grid;grid-template-columns:1.1fr .9fr;gap:clamp(2rem,5vw,4rem);margin-top:2.5rem;align-items:start}
+.bars{display:grid;gap:1.4rem}
+.bar label{display:flex;justify-content:space-between;font-weight:600;margin-bottom:.4rem}
+.track{height:30px;border:2px solid var(--line);background:var(--panel)}
+.track i{display:block;height:100%;width:0;background:var(--tide);transition:width 1.3s cubic-bezier(.2,.8,.2,1)}
+.bar:nth-child(2) i{background:var(--sun)}.bar:nth-child(3) i{background:var(--flame)}
+.in .track i{width:var(--w)}
+.bar:nth-child(2) i{transition-delay:.25s}.bar:nth-child(3) i{transition-delay:.5s}
+.matrix{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;font-size:.9rem}
+.matrix .h{color:var(--muted);align-self:end;text-align:center;padding-bottom:.2rem}
+.matrix .r{color:var(--muted);align-self:center;padding-right:.5rem;max-width:9ch;line-height:1.25}
+.cell{border:2px solid var(--line);padding:1.4rem .5rem;text-align:center;font:800 clamp(1.5rem,3vw,2.1rem) var(--display);opacity:0;transform:scale(.9);transition:opacity .5s,transform .5s}
+.cell.ok{background:var(--sun);color:#17221A}
+.in .cell{opacity:1;transform:none}
+.cell:nth-of-type(2){transition-delay:.3s}.cell:nth-of-type(3){transition-delay:.45s}.cell:nth-of-type(4){transition-delay:.6s}.cell:nth-of-type(5){transition-delay:.75s}
+.note{margin-top:1rem;color:var(--muted)}
+
+/* ===== 8. Run it + footer ===== */
+.run{background:#17221A;color:#E4E9CF}
+.run .wrap{display:grid;grid-template-columns:1fr auto;gap:2rem;align-items:end}
+.run h2{margin-bottom:1.25rem}
+.run p{color:#A5B3A0}
+.run pre{background:#0D140F;margin-top:1.75rem;border-left-color:var(--sun);transition:transform .2s}
+.run pre:hover{transform:translateX(6px)}
+.duo{display:flex;align-items:flex-end;gap:1.25rem;padding-bottom:1.5rem}
+.duo .bob{width:96px}.duo .bob+.bob{width:88px}
+footer{padding:2rem 0 2.5rem;color:var(--muted);font-size:.9rem}
+
+@media (max-width:900px){
+  .hero,.res,.run .wrap{grid-template-columns:1fr}
+  .how{grid-template-columns:1fr}
+  .tabs{flex-direction:row;overflow-x:auto;padding-bottom:.4rem}
+  .tab{flex:0 0 auto}.tab:hover{transform:none}
+  .duo{display:none}
+}
+@media (max-width:560px){
+  .score .wrap{grid-template-columns:1fr}
+  .score div,.score div+div{padding:1.25rem 0;border-right:0;border-bottom:2px solid var(--line)}
+  .score div:last-child{border-bottom:0}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  .cell{opacity:1;transform:none}.track i{width:var(--w)}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Layout structure ===== -->
+<header class="nav" id="nav">
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="orb" data-sprite="orb"></span>Duelcast</a>
+    <button class="burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="menu"><span></span></button>
+    <ul class="menu" id="menu">
+      <li><a href="#try">Try it</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#results">Results</a></li>
+      <li><a href="#run">Run it</a></li>
+    </ul>
+  </div>
+</header>
+
+<main id="top">
+  <section class="wrap hero">
+    <div>
+      <h1>Predict the winner before the first move.</h1>
+      <p>Duelcast is a random forest trained on 50,000 Pokémon battles, served through a FastAPI endpoint and packed into a Docker container. Send two names, get a winner and a probability.</p>
+      <div class="cta">
+        <a class="btn" href="#try">Try a battle</a>
+        <a class="link" href="#how">See how it works</a>
+      </div>
+    </div>
+
+    <div class="screen" aria-label="Animated pixel battle between two original creatures">
+      <div class="field">
+        <div class="fighter a">
+          <div class="tag"><span>Ember</span><span>HP</span></div>
+          <div class="hp"><i></i></div>
+          <div class="bob"><div class="spr" data-sprite="ember"></div></div>
+        </div>
+        <div class="fighter b">
+          <div class="tag"><span>Tide</span><span>HP</span></div>
+          <div class="hp"><i></i></div>
+          <div class="bob"><div class="spr" data-sprite="tide"></div></div>
+        </div>
+      </div>
+      <p class="say" id="say" aria-live="off">Ember is faster, so it moves first.</p>
+    </div>
+  </section>
+
+  <div class="score reveal">
+    <div class="wrap">
+      <div><b><span data-count="95.6" data-dec="1">95.6</span>%</b><span>of 10,000 unseen battles called correctly</span></div>
+      <div><b><span data-count="52.5" data-dec="1">52.5</span>%</b><span>what always guessing the likelier side would score</span></div>
+      <div><b><span data-count="50000">50,000</span></b><span>battles used for training and testing</span></div>
+    </div>
+  </div>
+
+  <section class="s" id="try">
+    <div class="wrap">
+      <h2>Pick two Pokémon and see who wins</h2>
+      <form class="duel" id="duel" autocomplete="off">
+        <label>First fighter<input id="first" list="names" value="Charizard" required></label>
+        <button type="button" class="swap" id="swap">Swap</button>
+        <label>Second fighter<input id="second" list="names" value="Blastoise" required></label>
+        <button class="btn" type="submit" id="go">Predict the winner</button>
+      </form>
+      <datalist id="names"></datalist>
+      <div class="out" id="out" aria-live="polite">Choose two names, then press the button. The model compares their six battle stats.</div>
+      <p class="note" style="margin-top:1rem;color:var(--muted)">The percentages show how strongly the forest’s trees agree, not a guarantee.</p>
+    </div>
+  </section>
+
+  <section class="s" id="how">
+    <div class="wrap">
+      <h2>From two CSV files to one endpoint</h2>
+      <div class="how">
+        <div class="tabs" role="tablist" aria-label="Pipeline stages">
+          <button class="tab" role="tab" id="t1" aria-selected="true" aria-controls="p1"><b>1</b>Data</button>
+          <button class="tab" role="tab" id="t2" aria-selected="false" aria-controls="p2"><b>2</b>Features</button>
+          <button class="tab" role="tab" id="t3" aria-selected="false" aria-controls="p3"><b>3</b>Model</button>
+          <button class="tab" role="tab" id="t4" aria-selected="false" aria-controls="p4"><b>4</b>API</button>
+        </div>
+        <div>
+          <div class="panel" role="tabpanel" id="p1" aria-labelledby="t1">
+            <h3>Two tables, one question</h3>
+            <p>One table holds each Pokémon’s stats. The other lists past battles by ID number, with the winner. Joined together, every battle row carries both fighters’ HP, Attack, Defense, Sp. Atk, Sp. Def and Speed.</p>
+<pre>pokemon.csv  → stats per Pokémon
+combats.csv  → first, second, winner (IDs)
+label        → first_wins (1 or 0)</pre>
+          </div>
+          <div class="panel" role="tabpanel" id="p2" aria-labelledby="t2" hidden>
+            <h3>Teach it to compare</h3>
+            <p>A decision tree can only ask about one column at a time. Adding the gap between the two fighters lets it ask “who is faster?” in a single question. Twelve raw features became eighteen.</p>
+<pre><em>diff_Speed</em> = first_Speed - second_Speed
+<em>diff_Attack</em> = first_Attack - second_Attack
+# ...one gap for each of the six stats</pre>
+          </div>
+          <div class="panel" role="tabpanel" id="p3" aria-labelledby="t3" hidden>
+            <h3>A hundred trees, one vote</h3>
+            <p>A random forest trains many different trees and lets them vote. Settings were chosen with 5-fold cross-validation on the training data, and the model was graded once on a locked test set of 10,000 battles.</p>
+<pre>RandomForestClassifier(
+    n_estimators=<em>100</em>, random_state=42, n_jobs=-1
+)</pre>
+          </div>
+          <div class="panel" role="tabpanel" id="p4" aria-labelledby="t4" hidden>
+            <h3>Names in, winner out</h3>
+            <p>The saved model sits behind a FastAPI endpoint. It looks up both Pokémon, builds the same eighteen features used in training, and returns the predicted winner with the model’s probability.</p>
+<pre>POST /predict
+{"first": "Charizard", "second": "Blastoise"}
+
+→ {"winner": <em>"..."</em>, "probability_first_wins": <em>0.0-1.0</em>}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="s reveal" id="results" style="background:var(--panel);border-top:2px solid var(--line);border-bottom:2px solid var(--line)">
+    <div class="wrap">
+      <h2>Honest numbers</h2>
+      <div class="res">
+        <div class="bars">
+          <div class="bar" style="--w:52.5%"><label><span>Always guess the likelier side</span><span>52.5%</span></label><div class="track"><i></i></div></div>
+          <div class="bar" style="--w:86.3%"><label><span>One shallow decision tree</span><span>86.3%</span></label><div class="track"><i></i></div></div>
+          <div class="bar" style="--w:95.6%"><label><span>Random forest with stat gaps</span><span>95.6%</span></label><div class="track"><i></i></div></div>
+          <p class="note">Every score comes from battles the model never saw during training.</p>
+        </div>
+        <div>
+          <div class="matrix" role="table" aria-label="Confusion matrix on 10,000 test battles">
+            <span></span><span class="h">Predicted: second wins</span><span class="h">Predicted: first wins</span>
+            <span class="r">Second won</span><div class="cell ok">4,993</div><div class="cell">254</div>
+            <span class="r">First won</span><div class="cell">188</div><div class="cell ok">4,565</div>
+          </div>
+          <p class="note">442 mistakes in 10,000 battles, split almost evenly between the two sides.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="s run" id="run">
+    <div class="wrap">
+      <div>
+        <h2>Run it anywhere</h2>
+        <p>The Dockerfile bundles Python, the pinned libraries and the trained model, so the API behaves the same on any machine. Then open the automatic docs page and try a matchup.</p>
+<pre>docker build -t pokemon-predictor .
+docker run -p 8000:8000 pokemon-predictor
+# open <em>http://127.0.0.1:8000/docs</em></pre>
+      </div>
+      <div class="duo" aria-hidden="true">
+        <div class="bob"><div data-sprite="ember"></div></div>
+        <div class="bob"><div data-sprite="tide"></div></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">Duelcast is a week-long learning project. Pokémon is a trademark of its owners; the creatures and sprites on this page are original pixel art.</div>
+</footer>
+
+<script>
+/* ===== Pixel sprites: drawn from text grids, no image files ===== */
+const PAL={k:'#17221A',o:'#D9411E',y:'#F2C14E',w:'#FFF8EC',r:'#A32E14',b:'#3E6F8E',c:'#8FBBD2'};
+const ART={
+ember:["................","......kkkk......",".....koooook....","....kooooooook..","....koowkoooook.","....kooookkkkk..",".....kooooook...","..kk.koyyyyok...",".kook.koyyyyok..","kroook.koyyok...","kyrook.kooook...",".kkkk..kokkok...","......kkok.kk...","................"],
+tide:["................","................",".....kkkkkk.....","...kkbbbbbbkk...","..kbbcbbbbcbbk..",".kbbbbcbbcbbbbk.","kkkbbbbbbbbbbkkk","kwwkyyyyyyyykkk.","kbbbkyyyyyyyyk..","kkkkk.kkkkkkk...","................","................"],
+orb:["..kkkk..",".krrrrk.","krrrrrrk","kkkwwkkk","kwwwwwwk","kwwwwwwk",".kwwwwk.","..kkkk.."]
+};
+function draw(g){const h=g.length,w=g[0].length;let s='';g.forEach((row,y)=>{let x=0;while(x<w){const c=row[x];if(c==='.'){x++;continue}let n=1;while(row[x+n]===c)n++;s+='<rect x="'+x+'" y="'+y+'" width="'+n+'" height="1" fill="'+PAL[c]+'"/>';x+=n}});return '<svg viewBox="0 0 '+w+' '+h+'" shape-rendering="crispEdges" aria-hidden="true">'+s+'</svg>'}
+document.querySelectorAll('[data-sprite]').forEach(el=>{el.innerHTML=draw(ART[el.dataset.sprite])});
+
+/* ===== Nav toggle ===== */
+const nav=document.getElementById('nav'),burger=document.getElementById('burger');
+burger.addEventListener('click',()=>{const o=nav.classList.toggle('open');burger.setAttribute('aria-expanded',o)});
+document.querySelectorAll('#menu a').forEach(a=>a.addEventListener('click',()=>{nav.classList.remove('open');burger.setAttribute('aria-expanded',false)}));
+
+/* ===== Tabs ===== */
+const tabs=[...document.querySelectorAll('[role=tab]')],panels=[...document.querySelectorAll('[role=tabpanel]')];
+function pick(i){tabs.forEach((t,j)=>{t.setAttribute('aria-selected',i===j);panels[j].hidden=i!==j})}
+tabs.forEach((t,i)=>{t.addEventListener('click',()=>pick(i));t.addEventListener('keydown',e=>{if(e.key==='ArrowDown'||e.key==='ArrowRight'){pick((i+1)%tabs.length);tabs[(i+1)%tabs.length].focus()}if(e.key==='ArrowUp'||e.key==='ArrowLeft'){const k=(i+tabs.length-1)%tabs.length;pick(k);tabs[k].focus()}})});
+
+/* ===== Battle captions, synced to the 6s sprite loop ===== */
+const say=document.getElementById('say');
+const script=[[0,'Ember is faster, so it moves first.'],[1.1,'Ember lunges. Tide takes the hit.'],[3,'Tide hangs on and answers back.'],[4.2,'Both stand. Speed decided who struck first.']];
+if(!matchMedia('(prefers-reduced-motion:reduce)').matches){
+  (function loop(){script.forEach(([t,txt])=>setTimeout(()=>{say.textContent=txt},t*1000));setTimeout(loop,6000)})();
+}
+
+/* ===== One scroll moment: numbers count up, bars fill, matrix lands ===== */
+const RM=matchMedia('(prefers-reduced-motion:reduce)').matches;
+function fmt(v,d){return v.toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d})}
+function count(el){const t=+el.dataset.count,d=+(el.dataset.dec||0);if(RM)return;const t0=performance.now();(function f(n){const p=Math.min(1,(n-t0)/1400);el.textContent=fmt(t*(1-Math.pow(1-p,3)),d);if(p<1)requestAnimationFrame(f)})(t0)}
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(!e.isIntersecting)return;e.target.classList.add('in');e.target.querySelectorAll('[data-count]').forEach(count);io.unobserve(e.target)}),{threshold:.25});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+
+/* ===== Live predictor: calls the FastAPI endpoints on the same origin ===== */
+const out=document.getElementById('out'),dl=document.getElementById('names'),f1=document.getElementById('first'),f2=document.getElementById('second'),go=document.getElementById('go');
+fetch('/pokemon').then(r=>r.ok?r.json():[]).then(list=>{list.forEach(n=>{const o=document.createElement('option');o.value=n;dl.appendChild(o)})}).catch(()=>{});
+document.getElementById('swap').addEventListener('click',()=>{const t=f1.value;f1.value=f2.value;f2.value=t});
+function show(msg,err){out.className='out'+(err?' err':'');out.textContent=msg}
+function render(d){
+  const p=Math.round(d.probability_first_wins*100),q=100-p;
+  out.className='out ok';out.textContent='';
+  const v=document.createElement('p');v.className='verdict';
+  const b=document.createElement('b');b.textContent=d.winner;
+  v.append(b,' is predicted to win.');
+  const s=document.createElement('div');s.className='split';
+  const i1=document.createElement('i'),i2=document.createElement('i');
+  i1.textContent=d.first+' '+p+'%';i2.textContent=d.second+' '+q+'%';
+  s.append(i1,i2);out.append(v,s);
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{i1.style.flexBasis=p+'%';i2.style.flexBasis=q+'%'}));
+}
+document.getElementById('duel').addEventListener('submit',async e=>{
+  e.preventDefault();
+  go.disabled=true;go.textContent='Predicting…';
+  try{
+    const r=await fetch('/predict',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({first:f1.value.trim(),second:f2.value.trim()})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){show(r.status===404?(d.detail||'Unknown Pokémon')+'. Pick a name from the list.':'Enter a name for both fighters.',true);return}
+    render(d);
+  }catch(_){show('Can’t reach the API. Start it, then open this page at http://127.0.0.1:8000.',true)}
+  finally{go.disabled=false;go.textContent='Predict the winner'}
+});
+</script>
+</body>
+</html>
