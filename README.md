@@ -2,6 +2,7 @@
 
 A machine learning project that predicts which of two Pokémon wins a battle. A random forest trained on 50,000 battles is served through a FastAPI backend, packaged with Docker, and used by a small web frontend where you pick two Pokémon and see the predicted winner with a probability.
 
+<img width="1470" height="832" alt="image" src="https://github.com/user-attachments/assets/721f603c-d4e1-4299-a056-ded55a17e442" />
 
 ## Results
 
